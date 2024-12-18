@@ -29,9 +29,9 @@ from repeng import ControlVector, ControlModel, DatasetEntry
 ###      APIS       ###
 #######################
 os.environ['HF_HOME'] = HF_HOME
-# login(HF_KEY)
-# user_info = whoami()
-# print(f"Logged in as: {user_info['name']} ({user_info['email']})")
+login(HF_KEY)
+user_info = whoami()
+print(f"Logged in as: {user_info['name']} ({user_info['email']})")
 
 #######################
 ###       DB       ###
@@ -52,6 +52,10 @@ def init_db():
 #######################
 ###     SERVER      ###
 #######################
+model = None
+tokenizer = None
+device = "cuda" #if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
 app = FastAPI(title="CVEC API", description="ControlVecAPI", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -66,7 +70,20 @@ async def global_exception_handler(request, exc: Exception) -> JSONResponse:
 
 @app.on_event("startup")
 async def startup_event():
+    global model, tokenizer, device
     init_db()
+    setup = CVector(
+        uuid=str(uuid.uuid4()),
+        location="none",
+        name="default", project="default",
+        pos=[], neg=[],
+        model=CV_DEFAULT_MODEL,
+        layers=CV_DEFAULT_LAYERS,
+        created_at=datetime.now().strftime('%Y%m%d')
+    )
+    ret, model_init = prep_model(setup)
+    if not ret: raise model_init
+    model, tokenizer, device = model_init
 
 #######################
 ###    REQ, RES     ###
@@ -257,13 +274,27 @@ def load_weighted_vectors(control_vector_weights:List[tuple[str, float]]) -> Tup
         if len(vectors) == 1:
             return True, (vectors[0], f_vec)
         else:   
-            final_vector = sum(vectors)
+            print(f"Summing {len(vectors)} vectors")
+            final_vector = vectors[0]  #sum(vectors)
+            # ControlVector()
+            #     model_type: str
+            #     directions: dict[int, np.ndarray]
+            for vector in vectors[1:]:
+                # check model type is same as final_vector
+                if vector.model_type != final_vector.model_type:
+                    raise Exception(f"Model type mismatch: {vector.model_type} != {final_vector.model_type}")
+                # check layers are same as final_vector
+                if vector.directions.keys() != final_vector.directions.keys():
+                    raise Exception(f"Layers mismatch: {vector.directions.keys()} != {final_vector.directions.keys()}")
+                # sum the vectors
+                final_vector.directions = {layer: final_vector.directions[layer] + vector.directions[layer] for layer in final_vector.directions}
             return True, (final_vector, f_vec)
     except Exception as e:
         print(f"Error during load_weighted_vectors: {e}")
         return False, e
 
 def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
+    global model, tokenizer, device
     try:
         res, data = load_weighted_vectors(control_vector_weights)
         if not res: raise data
@@ -271,15 +302,16 @@ def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
 
         prompt_input = chat_template_unparse([("user", prompt)])
 
-        res, data = prep_model(f_vec)
-        if not res: raise data
-        model, tokenizer, device = data
+        if model is None or tokenizer is None or device is None:
+            res, data = prep_model(f_vec)
+            if not res: raise data
+            model, tokenizer, device = data
+        
         
         max_new_tokens: int = CV_MAX_NEW_TOKENS
         repetition_penalty: float = CV_REPETITION_PENALTY
         show_baseline: bool = CV_SHOW_BASELINE
         temperature: float = CV_TEMPERATURE
-
 
         model_inputs = tokenizer(prompt_input, return_tensors="pt").to(device)
         streamer = TextIteratorStreamer(tokenizer, timeout=10.0, skip_prompt=True, skip_special_tokens=True)
@@ -304,7 +336,7 @@ def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
         model_output = ""
         for new_text in streamer:
             model_output += new_text
-            print(new_text, end="", flush=True)
+            # print(new_text, end="", flush=True)
             yield new_text
         return model_output
     except Exception as e:
@@ -314,7 +346,8 @@ def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
 #######################
 ###     MODELS      ###
 #######################
-def prep_model(vector:CVector) -> Tuple[bool, Union[Tuple[ControlModel, AutoTokenizer, str], Exception]]:
+
+def prep_model(setup:CVector | dict) -> Tuple[bool, Union[Tuple[ControlModel, AutoTokenizer, str], Exception]]:
     try:
         try:
             gc.collect()
@@ -323,8 +356,8 @@ def prep_model(vector:CVector) -> Tuple[bool, Union[Tuple[ControlModel, AutoToke
             print(f"Error during garbage collection and cuda cleanup prep_model: {e}")
             raise e
             
-        model_name = vector.model 
-        device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        model_name = setup.model 
+        device = "cuda:0" #if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         print(f"Using device: {device}")
         print("Loading tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -335,7 +368,7 @@ def prep_model(vector:CVector) -> Tuple[bool, Union[Tuple[ControlModel, AutoToke
         )
         print("Wrapping model")
         wrapped_model = model
-        model = ControlModel(wrapped_model, vector.layers) 
+        model = ControlModel(wrapped_model, setup.layers) 
         return True, (model, tokenizer, device)
     except Exception as e:
         print(f"Error during prep_model: {e}")
@@ -351,11 +384,11 @@ def training_worker():
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM vectors WHERE status IN ('queued', 'training')")
             queue_length = cursor.fetchone()[0]
-            print("")
-            print(datetime.now().strftime('%Y%m%d %H:%M:%S'), f"Current queue length: {queue_length}")
             cursor.execute("SELECT * FROM vectors WHERE status IN ('queued', 'training') LIMIT 1")
             vector = cursor.fetchone()
         if vector:
+            print(" ")
+            print(datetime.now().strftime('%Y%m%d %H:%M:%S'), f"Current queue length: {queue_length}")
             vector = CVector(**dict(zip(["uuid", "name", "location", "project", "model", "status", "created_at"], vector[:5] + vector[6:])), layers=[int(x) for x in vector[5].split(",")], pos=[x for x in vector[7].split(",")], neg=[x for x in vector[8].split(",")])
             print(datetime.now().strftime('%Y%m%d %H:%M:%S'), f"Processing vector {vector.uuid}")
             try:
@@ -390,7 +423,7 @@ def training_worker():
                     conn.commit()
                 print(f"Error training vector {vector.uuid}: {e}")
         else:
-            time.sleep(5)
+            time.sleep(10)
 
 
 #######################

@@ -40,17 +40,19 @@
             <table class="table table-sm table-compact">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Project</th>
-                        <th>Status</th>
+                        <th @click="sortBy('name')">Name <span v-if="sortKey === 'name'">{{ sortOrder === 1 ? '▲' : '▼' }}</span></th>
+                        <th @click="sortBy('project')">Project <span v-if="sortKey === 'project'">{{ sortOrder === 1 ? '▲' : '▼' }}</span></th>
+                        <th @click="sortBy('status')">Status <span v-if="sortKey === 'status'">{{ sortOrder === 1 ? '▲' : '▼' }}</span></th>
+                        <th @click="sortBy('model')">Model <span v-if="sortKey === 'model'">{{ sortOrder === 1 ? '▲' : '▼' }}</span></th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="vector in vectors" :key="vector.uuid">
+                    <tr v-for="vector in sortedVectors" :key="vector.uuid">
                         <td>{{ vector.name }}</td>
                         <td>{{ vector.project }}</td>
                         <td>{{ vector.status }}</td>
+                        <td>{{ vector.model }}</td>
                         <td>
                             <button 
                                 class="btn btn-sm" 
@@ -114,11 +116,27 @@
 
         <div v-if="activeTab === 'generate'">
                 <div class="mb-3">
-                    <div class="chat-history border rounded p-3 mb-3" style="height: 300px; overflow-y: auto;">
+                    <div class="chat-history border rounded p-3 mb-3" style="height: 600px; overflow-y: auto;">
                         <div v-for="message in generateResponse.chatHistory" class="mb-2">
                             <div class="d-flex">
-                                <strong class="me-2">{{ message }}:</strong>
-                                <span>{{ message }}</span>
+                                <div v-if="message.role === 'user'">
+                                    <b>User</b>
+                                    <div class="d-flex">
+                                        <div class="small text-muted mb-1">
+                                            <span v-for="(vector, index) in message.vectors" :key="vector.uuid" class="me-2">
+                                                {{ vector.name }}:{{ Number(vector.weight).toFixed(2) }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <span>{{ message.content }}</span>
+                                </div>
+                                <div v-else>
+                                    <b>Model</b>
+                                    <div class="d-flex">
+                                        <div class="small text-muted mb-1"></div>
+                                    </div>
+                                    <span>{{ message.content }}</span>
+                                </div>
                             </div>
                         </div>
                         <div ref="chatBottom"></div>
@@ -127,7 +145,7 @@
 
                 <div class="mb-3">
                     <label for="prompt" class="form-label">Prompt:</label>
-                    <textarea id="prompt" v-model="generateForm.prompt" rows="3" class="form-control" required></textarea>
+                    <textarea id="prompt" v-model="generateForm.prompt" rows="2" class="form-control" required></textarea>
                 </div>
 
                 <div class="mb-3">
@@ -197,7 +215,9 @@
                         mps: false
                     },
                     selectedVector: null,
-                    darkMode: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                    darkMode: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches,
+                    sortKey: 'created_at',
+                    sortOrder: -1
                 }
             },
             async mounted() {
@@ -269,6 +289,18 @@
                     }
 
                     try {
+
+                        this.generateResponse.chatHistory.push(
+                            {   
+                                "role":"user", 
+                                "content": this.generateForm.prompt,
+                                "vectors": this.generateForm.selectedVectors.map(v => ({
+                                    uuid: v.uuid,
+                                    weight: v.weight,
+                                    name: v.name
+                                }))
+                            }
+                        )
                         const response = await fetch('/generate', {
                             method: 'POST',
                             headers: {
@@ -276,9 +308,43 @@
                             },
                             body: JSON.stringify(payload)
                         })
-                        const data = await response.json()
-                        this.generateResponse.chatHistory = data.chatHistory
-                        console.log('Generated text:', data)
+
+                        const reader = response.body.getReader()
+                        const decoder = new TextDecoder('utf-8')
+                        let message = ''
+
+                        while (true) {
+                            const { done, value } = await reader.read()
+                            if (done) {
+                                console.log('Generation complete')
+                                await this.$nextTick()
+                                this.$refs.chatBottom.scrollIntoView({ behavior: 'smooth' })
+                                break;
+                            }
+                            else{
+                                const chunk = decoder.decode(value)
+                                message += chunk
+                                // update the chat history of the most recent message after the last user, if it doesnt exist make it
+                                const lastUserMessage = this.generateResponse.chatHistory.findLast(message => message.role === 'user')
+                                const lastUserMessageIndex = this.generateResponse.chatHistory.indexOf(lastUserMessage)
+                                const lastAssistantMessage = this.generateResponse.chatHistory[lastUserMessageIndex + 1]
+                                if (lastAssistantMessage) {
+                                    lastAssistantMessage.content = message
+                                }
+                                else {
+                                    this.generateResponse.chatHistory.push({
+                                        "role": "assistant",
+                                        "content": message
+                                    })
+                                }
+                                await this.$nextTick()
+                                this.$refs.chatBottom.scrollIntoView({ behavior: 'smooth' })
+                            }
+
+                            
+                        }
+
+                        console.log('Generated text:', message)
                     } catch (error) {
                         console.error('Error generating text:', error)
                     }
@@ -306,6 +372,34 @@
                 toggleDarkMode() {
                     document.body.classList.toggle('bootstrap', !this.darkMode)
                     document.body.classList.toggle('bootstrap-dark', this.darkMode)
+                },
+                sortBy(key) {
+                    if (this.sortKey === key) {
+                        this.sortOrder = -this.sortOrder
+                    } else {
+                        this.sortKey = key
+                        this.sortOrder = 1
+                    }
+                }
+            },
+            computed: {
+                groupedVectors() {
+                    return this.vectors.reduce((acc, vector) => {
+                        if (!acc[vector.model]) {
+                            acc[vector.model] = [];
+                        }
+                        acc[vector.model].push(vector);
+                        return acc;
+                    }, {});
+                },
+                sortedVectors() {
+                    return this.vectors.sort((a, b) => {
+                        let modifier = 1
+                        if (this.sortKey === 'created_at') modifier = -1
+                        if (a[this.sortKey] < b[this.sortKey]) return -1 * modifier
+                        if (a[this.sortKey] > b[this.sortKey]) return 1 * modifier
+                        return 0
+                    })
                 }
             }
         }).mount('#app')

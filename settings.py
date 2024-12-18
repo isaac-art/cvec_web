@@ -1,4 +1,4 @@
-PROD = False
+PROD = True
 
 # API KEYS 
 RUNPOD_API=""
