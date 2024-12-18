@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ControlVector</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-dark-5@1.1.3/dist/css/bootstrap-dark.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body>
+    <div id="app" class="container-fluid py-4">
+        <div class="mb-4">
+            <span v-if="sysCheck.cuda" class="badge bg-success">CUDA Available</span>
+            <span v-else-if="sysCheck.mps" class="badge bg-warning">MPS Available</span>
+            <span v-else class="badge bg-danger">No Accelerator Available</span>
+        </div>
+<!-- 
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="darkModeSwitch" v-model="darkMode" @change="toggleDarkMode">
+            <label class="form-check-label" for="darkModeSwitch">Dark Mode</label>
+        </div> -->
+
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <a class="nav-link" :class="{ active: activeTab === 'viewer' }" @click="activeTab = 'viewer'">Vectors</a>
+            </li>
+            <li class="nav-item" v-if="selectedVector">
+                <a class="nav-link" :class="{ active: activeTab === 'view' }" @click="activeTab = 'view'">View Vector</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" :class="{ active: activeTab === 'create' }" @click="activeTab = 'create'">Create Vector</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" :class="{ active: activeTab === 'generate' }" @click="activeTab = 'generate'">Generate</a>
+            </li>
+        </ul>
+
+        <div v-if="activeTab === 'viewer'">
+            <table class="table table-sm table-compact">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Project</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="vector in vectors" :key="vector.uuid">
+                        <td>{{ vector.name }}</td>
+                        <td>{{ vector.project }}</td>
+                        <td>{{ vector.status }}</td>
+                        <td>
+                            <button 
+                                class="btn btn-sm" 
+                                :class="{ 'btn-primary': !isVectorSelected(vector), 'btn-secondary': isVectorSelected(vector) }" 
+                                @click="toggleVector(vector)"
+                                v-if="vector.status === 'trained'">
+                                {{ isVectorSelected(vector) ? 'Remove' : 'Add' }}
+                            </button>
+                            <button class="btn btn-sm btn-info ms-2" @click="viewVector(vector)">View</button>
+                            <button class="btn btn-sm btn-danger ms-2" @click="deleteVector(vector)">Delete</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div v-if="activeTab === 'create'">
+                <div class="mb-3">
+                    <label for="name" class="form-label">Vector Name:</label>
+                    <input type="text" id="name" v-model="trainForm.name" class="form-control" required>
+                </div>
+
+                <div class="mb-3">
+                    <label for="project" class="form-label">Project:</label>
+                    <div class="input-group">
+                        <select v-if="projects.length" id="project" v-model="trainForm.project" class="form-select">
+                            <option v-for="project in projects" :key="project" :value="project">{{ project }}</option>
+                        </select>
+                        <input v-if="isNewProject" type="text" id="new-project" v-model="trainForm.project" class="form-control" placeholder="Enter new project name" required>
+                        <button class="btn btn-outline-secondary" type="button" @click="isNewProject = !isNewProject">
+                            {{ isNewProject ? 'Select Existing' : 'New Project' }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="pos" class="form-label">AXIS A (one per line):</label>
+                    <textarea id="pos" v-model="trainForm.posText" rows="3" class="form-control" required></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label for="neg" class="form-label">AXIS B (one per line):</label>
+                    <textarea id="neg" v-model="trainForm.negText" rows="3" class="form-control" required></textarea>
+                </div>
+
+                <div v-if="advanced" class="mb-3">
+                    <label for="model" class="form-label">Model:</label>
+                    <input type="text" id="model" v-model="trainForm.model" class="form-control">
+                </div>
+
+                <div v-if="advanced" class="mb-3">
+                    <label class="form-label">Layers:</label>
+                    <div class="form-check" v-for="layer in 31" :key="layer">
+                        <input type="checkbox" :id="'layer-' + layer" :value="layer - 1" :checked="layer >= 5 && layer <= 22" v-model="trainForm.layers" class="form-check-input">
+                        <label :for="'layer-' + layer" class="form-check-label">{{ layer - 1 }}</label>
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-primary" @click="trainVector">Train Vector</button>
+        </div>
+
+        <div v-if="activeTab === 'generate'">
+                <div class="mb-3">
+                    <div class="chat-history border rounded p-3 mb-3" style="height: 300px; overflow-y: auto;">
+                        <div v-for="message in generateResponse.chatHistory" class="mb-2">
+                            <div class="d-flex">
+                                <strong class="me-2">{{ message }}:</strong>
+                                <span>{{ message }}</span>
+                            </div>
+                        </div>
+                        <div ref="chatBottom"></div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="prompt" class="form-label">Prompt:</label>
+                    <textarea id="prompt" v-model="generateForm.prompt" rows="3" class="form-control" required></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Selected Vectors:</label>
+                    <div v-for="vector in generateForm.selectedVectors" :key="vector.uuid" class="mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="text-center flex"><b>{{ vector.name }}</b></span>
+                            <span>{{ Number(vector.weight).toFixed(2) }}</span>
+                            <button type="button" class="btn btn-sm btn-danger" @click="removeVector(vector)">Remove</button>
+                        </div>
+                        <input type="range" v-model="vector.weight" min="-2.1" max="2.1" value="0.0" step="0.05" class="form-range">
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-primary" @click="generateText">Submit</button>
+        </div>
+
+        <div v-if="activeTab === 'view' && selectedVector">
+            <h4>Vector Details</h4>
+            <p><strong>Name:</strong> {{ selectedVector.name }}</p>
+            <p><strong>Project:</strong> {{ selectedVector.project }}</p>
+            <p><strong>Status:</strong> {{ selectedVector.status }}</p>
+            <p><strong>Created At:</strong> {{ selectedVector.created_at }}</p>
+            <p><strong>Model:</strong> {{ selectedVector.model }}</p>
+            <p><strong>Layers:</strong> {{ selectedVector.layers.join(', ') }}</p>
+            <p><strong>Axis A:</strong></p>
+            <ul>
+                <li v-for="example in selectedVector.pos" :key="example">{{ example }}</li>
+            </ul>
+            <p><strong>Axis B:</strong></p>
+            <ul>
+                <li v-for="example in selectedVector.neg" :key="example">{{ example }}</li>
+            </ul>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp } = Vue
+        
+        createApp({
+            data() {
+                return {
+                    activeTab: 'viewer',
+                    vectors: [],
+                    projects: [],
+                    isNewProject: false,
+                    advanced: false,
+                    project: 'ControlVector',
+                    trainForm: {
+                        name: '',
+                        project: 'default',
+                        posText: '',
+                        negText: '',
+                        model: 'meta-llama/Meta-Llama-3-8B-Instruct',
+                        layers: Array.from({length: 18}, (_, i) => i + 5)
+                    },
+                    generateForm: {
+                        prompt: '',
+                        selectedVectors: []
+                    },
+                    generateResponse: {
+                        chatHistory: []
+                    },
+                    sysCheck: {
+                        cuda: false,
+                        mps: false
+                    },
+                    selectedVector: null,
+                    darkMode: window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                }
+            },
+            async mounted() {
+                await this.getProjects()
+                await this.getVectors()
+                await this.checkSystem()
+                
+                setInterval(async () => {
+                    await this.getVectors()
+                }, 10000)
+                this.toggleDarkMode()
+            },
+            methods: {
+                async getProjects() {   
+                    const response = await fetch('/projects')
+                    this.projects = await response.json()
+                },
+                async trainVector() {
+                    const payload = {
+                        name: this.trainForm.name,
+                        project: this.trainForm.project,
+                        pos: this.trainForm.posText.split('\n').filter(x => x),
+                        neg: this.trainForm.negText.split('\n').filter(x => x),
+                        model: this.trainForm.model,
+                        layers: this.trainForm.layers
+                    }
+                    
+                    try {
+                        const response = await fetch('/train', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                        const data = await response.json()
+                        console.log('Training started:', data)
+                        
+                        this.activeTab = 'viewer'
+                        
+                        await this.getVectors()
+                    } catch (error) {
+                        console.error('Error training vector:', error)
+                    }
+                },
+                async getVectors() {
+                    const response = await fetch('/vectors')
+                    this.vectors = (await response.json()).sort((a, b) => b.created_at.localeCompare(a.created_at))
+                },
+                async deleteVector(vector) {
+                    const response = await fetch(`/vectors/${vector.uuid}`, {
+                        method: 'DELETE'
+                    })
+                    this.getVectors()
+                },
+                addVector(vector) {
+                    this.generateForm.selectedVectors.push({ ...vector, weight: 1 })
+                },
+                removeVector(vector) {
+                    const index = this.generateForm.selectedVectors.findIndex(v => v.uuid === vector.uuid)
+                    if (index !== -1) {
+                        this.generateForm.selectedVectors.splice(index, 1)
+                    }
+                },
+                async generateText() {
+                    const payload = {
+                        prompt: this.generateForm.prompt,
+                        control_vector_weights: this.generateForm.selectedVectors.map(v => [v.uuid, v.weight])
+                    }
+
+                    try {
+                        const response = await fetch('/generate', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        })
+                        const data = await response.json()
+                        this.generateResponse.chatHistory = data.chatHistory
+                        console.log('Generated text:', data)
+                    } catch (error) {
+                        console.error('Error generating text:', error)
+                    }
+                },
+                async checkSystem() {
+                    const response = await fetch('/sys')
+                    const data = await response.json()
+                    this.sysCheck.cuda = data.cuda
+                    this.sysCheck.mps = data.mps
+                },
+                isVectorSelected(vector) {
+                    return this.generateForm.selectedVectors.some(v => v.uuid === vector.uuid)
+                },
+                toggleVector(vector) {
+                    if (this.isVectorSelected(vector)) {
+                        this.removeVector(vector)
+                    } else {
+                        this.addVector(vector)
+                    }
+                },
+                viewVector(vector) {
+                    this.selectedVector = vector
+                    this.activeTab = 'view'
+                },
+                toggleDarkMode() {
+                    document.body.classList.toggle('bootstrap', !this.darkMode)
+                    document.body.classList.toggle('bootstrap-dark', this.darkMode)
+                }
+            }
+        }).mount('#app')
+    </script>
+</body>
+</html>
