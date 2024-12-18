@@ -31,7 +31,16 @@ worker will process the queue and train new vectors
 
 
 ### SCREENSHOTS
-![Generate](screen_shots/generate.png) 
+![Generate](screen_shots/generate.png)
+
+---
+
 ![List](screen_shots/list.png)
+
+---
+
 ![Create Vector](screen_shots/create.png)
+
+---
+
 ![View](screen_shots/list.png)
