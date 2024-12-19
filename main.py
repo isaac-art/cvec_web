@@ -54,7 +54,7 @@ def init_db():
 #######################
 model = None
 tokenizer = None
-device = "cuda" #if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 app = FastAPI(title="CVEC API", description="ControlVecAPI", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -81,6 +81,7 @@ async def startup_event():
         layers=CV_DEFAULT_LAYERS,
         created_at=datetime.now().strftime('%Y%m%d')
     )
+
     ret, model_init = prep_model(setup)
     if not ret: raise model_init
     model, tokenizer, device = model_init
@@ -123,6 +124,10 @@ async def root():
 @app.get("/moon")
 async def moon():
     return FileResponse("static/moon.html")
+
+@app.get("/axis")
+async def axis():
+    return FileResponse("static/axis.html")
 
 
 @app.get("/sys")
@@ -187,6 +192,20 @@ async def get_vectors_by_project(project: str):
             "pos": [x for x in vector[7].split(",")],
             "neg": [x for x in vector[8].split(",")],
         }) for vector in vectors]
+
+@app.get("/vector/{uuid}/layers")
+async def get_vector_layers(uuid: str):
+    # return the numpy lists for the file at location 
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT location FROM vectors WHERE uuid = ?", (uuid,))
+        location = cursor.fetchone()[0]
+    vector = ControlVector.import_gguf(location)
+    print(vector.directions)
+    return {
+        "layers": {str(layer): direction.tolist() for layer, direction in vector.directions.items()}
+    }
+
 
 @app.delete("/vectors/{id}")
 async def delete_vector(id: str):
