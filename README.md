@@ -2,6 +2,12 @@
 
 ## SETUP
 
+
+NOTE: if on runpod remember to set HF_HOME to workspace cache (and HF_TOKEN too)
+
+WARN: on run it will download "meta-llama/Meta-Llama-3-8B-Instruct" if its not present in current HF_HOME
+
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -9,7 +15,6 @@ pip install -r requirements.txt
 ```
 
 I include `https://github.com/vgel/repeng/` in this repo for the `repeng` library
-
 
 
 ## RUN SERVER
