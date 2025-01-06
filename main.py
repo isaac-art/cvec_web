@@ -50,11 +50,12 @@ def init_db():
         conn.commit()
 
 #######################
-###     SERVER      ###
+###     SERVER      ###s
 #######################
 model = None
 tokenizer = None
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+chat_history = []
 
 app = FastAPI(title="CVEC API", description="ControlVecAPI", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
