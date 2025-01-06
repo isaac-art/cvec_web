@@ -271,6 +271,20 @@ async def demo():
     
     return results
 
+@app.post("/clear_chat")
+async def clear_chat():
+    global chat_history
+    chat_history = []
+    return {"status": "success"}
+
+@app.post("/archive_chat")
+async def archive_chat():
+    global chat_history
+    archive_filename = f"chat_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(archive_filename, 'w') as archive_file:
+        json.dump(chat_history, archive_file)
+    return {"status": "success", "archive": archive_filename}
+
 #######################
 ###    GENERATE     ###
 #######################
@@ -313,13 +327,14 @@ def load_weighted_vectors(control_vector_weights:List[tuple[str, float]]) -> Tup
         return False, e
 
 def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
-    global model, tokenizer, device
+    global model, tokenizer, device, chat_history
     try:
         res, data = load_weighted_vectors(control_vector_weights)
         if not res: raise data
         final_vector, f_vec = data
 
-        prompt_input = chat_template_unparse([("user", prompt)])
+        chat_history.append({"role": "user", "content": prompt})
+        prompt_input = chat_template_unparse([(msg["role"], msg["content"]) for msg in chat_history])
 
         if model is None or tokenizer is None or device is None:
             res, data = prep_model(f_vec)
@@ -357,6 +372,7 @@ def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
             model_output += new_text
             # print(new_text, end="", flush=True)
             yield new_text
+        chat_history.append({"role": "assistant", "content": model_output})
         return model_output
     except Exception as e:
         print(f"Error during run_generation: {e}")

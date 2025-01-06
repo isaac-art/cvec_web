@@ -161,6 +161,8 @@
                 </div>
 
                 <button type="button" class="btn btn-primary" @click="generateText">Submit</button>
+                <button type="button" class="btn btn-secondary" @click="clearChat">Clear Chat</button>
+                <button type="button" class="btn btn-secondary" @click="archiveChat">Archive Chat</button>
         </div>
 
         <div v-if="activeTab === 'view' && selectedVector">
@@ -347,6 +349,35 @@
                         console.log('Generated text:', message)
                     } catch (error) {
                         console.error('Error generating text:', error)
+                    }
+                },
+                async clearChat() {
+                    try {
+                        const response = await fetch('/clear_chat', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        })
+                        const data = await response.json()
+                        console.log('Chat cleared:', data)
+                        this.generateResponse.chatHistory = []
+                    } catch (error) {
+                        console.error('Error clearing chat:', error)
+                    }
+                },
+                async archiveChat() {
+                    try {
+                        const response = await fetch('/archive_chat', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        })
+                        const data = await response.json()
+                        console.log('Chat archived:', data)
+                    } catch (error) {
+                        console.error('Error archiving chat:', error)
                     }
                 },
                 async checkSystem() {
