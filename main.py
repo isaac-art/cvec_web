@@ -10,7 +10,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from contextlib import contextmanager
 from huggingface_hub import login, whoami
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -113,6 +113,25 @@ class CVector(BaseModel):
 class PromptRequest(BaseModel):
     prompt: str
     control_vector_weights: List[Tuple[str, float]]
+    session_id: str
+
+class ChatHistory(BaseModel):
+    history: List[Dict[str, str]]
+
+class UserSession:
+    def __init__(self):
+        self.chat_history: List[Dict[str, str]] = []
+
+class UserSessionManager:
+    def __init__(self):
+        self.sessions: Dict[str, UserSession] = {}
+
+    def get_session(self, session_id: str) -> UserSession:
+        if session_id not in self.sessions:
+            self.sessions[session_id] = UserSession()
+        return self.sessions[session_id]
+
+session_manager = UserSessionManager()
 
 #######################
 ###       API       ###
@@ -141,8 +160,10 @@ async def sys_check():
     }
 
 @app.post("/generate")
-async def generate(pr:PromptRequest):
-    stream_response = run_generation(pr.control_vector_weights, pr.prompt)
+async def generate(pr: PromptRequest):
+    session_id = pr.session_id
+    user_session = session_manager.get_session(session_id)
+    stream_response = run_generation(pr.control_vector_weights, pr.prompt, user_session)
     return StreamingResponse(stream_response, media_type="text/plain")
 
 @app.get("/projects", response_model=List[str])
@@ -273,17 +294,21 @@ async def demo():
     return results
 
 @app.post("/clear_chat")
-async def clear_chat():
-    global chat_history
-    chat_history = []
+async def clear_chat(request: Request):
+    data = await request.json()
+    session_id = data["session_id"]
+    user_session = session_manager.get_session(session_id)
+    user_session.chat_history = []
     return {"status": "success"}
 
 @app.post("/archive_chat")
-async def archive_chat():
-    global chat_history
-    archive_filename = f"chat_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+async def archive_chat(request: Request):
+    data = await request.json()
+    session_id = data["session_id"]
+    user_session = session_manager.get_session(session_id)
+    archive_filename = f"chat_archive_{session_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(archive_filename, 'w') as archive_file:
-        json.dump(chat_history, archive_file)
+        json.dump(user_session.chat_history, archive_file)
     return {"status": "success", "archive": archive_filename}
 
 #######################
@@ -327,15 +352,15 @@ def load_weighted_vectors(control_vector_weights:List[tuple[str, float]]) -> Tup
         print(f"Error during load_weighted_vectors: {e}")
         return False, e
 
-def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
+def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str, user_session: UserSession):
     global model, tokenizer, device, chat_history
     try:
         res, data = load_weighted_vectors(control_vector_weights)
         if not res: raise data
         final_vector, f_vec = data
 
-        chat_history.append({"role": "user", "content": prompt})
-        prompt_input = chat_template_unparse([(msg["role"], msg["content"]) for msg in chat_history])
+        user_session.chat_history.append({"role": "user", "content": prompt})
+        prompt_input = chat_template_unparse([(msg["role"], msg["content"]) for msg in user_session.chat_history])
 
         if model is None or tokenizer is None or device is None:
             res, data = prep_model(f_vec)
@@ -373,7 +398,7 @@ def run_generation(control_vector_weights:List[tuple[str, float]], prompt:str):
             model_output += new_text
             # print(new_text, end="", flush=True)
             yield new_text
-        chat_history.append({"role": "assistant", "content": model_output})
+        user_session.chat_history.append({"role": "assistant", "content": model_output})
         return model_output
     except Exception as e:
         print(f"Error during run_generation: {e}")

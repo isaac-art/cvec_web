@@ -2,7 +2,9 @@ import os
 
 from huggingface_hub import login, whoami
 
-from settings import *
+try: from settings_admin import *
+except ImportError: from settings import *
+
 from main import training_worker
 
 os.environ['HF_HOME'] = HF_HOME
