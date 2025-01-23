@@ -89,3 +89,8 @@ worker will process the queue and train new vectors
 ---
 
 ![View](screen_shots/list.png)
+
+
+---
+
+![Live Stream - editing vector strengthper token](screen_shots/livestream.png)
