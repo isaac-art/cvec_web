@@ -418,7 +418,7 @@ def prep_model(setup:CVector | dict) -> Tuple[bool, Union[Tuple[ControlModel, Au
             raise e
             
         model_name = setup.model 
-        device = "cuda:0" #if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        device = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
         print(f"Using device: {device}")
         print("Loading tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(model_name)
