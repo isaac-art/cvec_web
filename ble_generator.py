@@ -8,6 +8,11 @@ import asyncio
 import struct
 from bleak import BleakClient
 import colorsys
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from sse_starlette.sse import EventSourceResponse
+from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -18,12 +23,12 @@ CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
-N_CONTEXT = 50
+N_CONTEXT = 5000
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 # CV_DEFAULT_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
-CVEC = "vectors/default/Wind_20250123.gguf"
+CVEC = "vectors/default/Fish_20250107.gguf"
 MIN_CVEC, MAX_CVEC = -0.5, 0.9
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -38,6 +43,96 @@ DEVICE_ADDRESS = "753E1AA1-3AD1-DEF4-5B4A-CF09F9640206"
 # Global state
 current_strength = 0.0
 generation_active = True
+token_queue = asyncio.Queue()
+
+app = FastAPI()
+
+# HTML template with JavaScript for SSE handling
+HTML_CONTENT = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Text Generation Viewer</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+            transition: background-color 0.3s;
+        }
+        #text-container {
+            font-size: 16px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .token {
+            transition: color 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div id="text-container"></div>
+    <script>
+        const textContainer = document.getElementById('text-container');
+        
+        function strengthToColor(strength) {
+            // Convert strength [-0.5, 0.9] to hue [120, 0]
+            const normalized = (strength - (-0.5)) / (0.9 - (-0.5));
+            const hue = (1 - normalized) * 120;
+            return `hsl(${hue}, 80%, 40%)`;
+        }
+        
+        function strengthToBackground(strength) {
+            const normalized = (strength - (-0.5)) / (0.9 - (-0.5));
+            const hue = (1 - normalized) * 120;
+            return `hsl(${hue}, 30%, 95%)`;
+        }
+
+        const evtSource = new EventSource("/stream");
+        evtSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Update background color based on strength
+            document.body.style.backgroundColor = strengthToBackground(data.strength);
+            
+            // Add new token with color based on strength
+            const span = document.createElement('span');
+            span.textContent = data.content;
+            span.className = 'token';
+            span.style.color = strengthToColor(data.strength);
+            textContainer.appendChild(span);
+            
+            // Scroll to bottom
+            window.scrollTo(0, document.body.scrollHeight);
+        };
+    </script>
+</body>
+</html>
+"""
+
+@app.get("/", response_class=HTMLResponse)
+async def get_page():
+    return HTML_CONTENT
+
+@app.get("/stream")
+async def stream_text(request: Request):
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                
+                # Get next token from queue
+                token = await token_queue.get()
+                yield {
+                    "data": json.dumps({
+                        "content": token.content,
+                        "strength": token.strength
+                    })
+                }
+        except asyncio.CancelledError:
+            pass
+    
+    return EventSourceResponse(event_generator())
 
 @dataclasses.dataclass
 class Token:
@@ -91,10 +186,10 @@ class BLEController:
         """Handle incoming notifications from the BLE device."""
         global current_strength
         pitch, roll, yaw = self.parse_imu_data(data)
-        # Map yaw to [-1, 1]
-        normalized_yaw = yaw / 180.0  # Assuming yaw is in degrees [-180, 180]
-        normalized_yaw = max(-1.0, min(1.0, normalized_yaw))  # Clamp to [-1, 1]
+        # Map yaw to smooth circular pattern: -180/180° -> 0, 90° -> 1, -90° -> -1
+        normalized_yaw = math.sin(math.radians(yaw))  # Convert to radians and apply sine
         current_strength = normalized_yaw
+        # print(f"Current strength: {current_strength:.2f}")
 
 async def run_ble():
     global generation_active  # Declare global at start of function
@@ -108,40 +203,49 @@ async def run_ble():
             await client.start_notify(IMU_DATA_UUID, ble.notification_handler)
             
             while generation_active:
-                await asyncio.sleep(0.01)  # Fast updates for smooth control
+                await asyncio.sleep(0.1)  # Fast updates for smooth control
 
     except Exception as e:
         print(f"\nBLE Error: {str(e)}")
         generation_active = False
 
 async def run_generator():
-    global generation_active  # Declare global at start of function
+    global generation_active
     generator = Generator()
-    print(PROMPT, end='', flush=True)
+    # print(PROMPT, end='', flush=True)
+    
+    # Put initial prompt in queue
+    await token_queue.put(Token(content=PROMPT, strength=0))
     
     try:
         while generation_active:
             token = generator.next(current_strength)
-            print(token.content, end='', flush=True)
-            await asyncio.sleep(0.05)  # Control generation speed
+            await token_queue.put(token)
+            await asyncio.sleep(0.001)
             
     except Exception as e:
         print(f"\nGenerator Error: {str(e)}")
         generation_active = False
 
+async def run_server():
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
+
 async def main():
-    global generation_active  # Declare global at start of function
+    global generation_active
     try:
-        # Run both processes concurrently
+        # Run all processes concurrently
         await asyncio.gather(
             run_ble(),
-            run_generator()
+            run_generator(),
+            run_server()
         )
     except KeyboardInterrupt:
         print("\nStopping...")
         generation_active = False
     finally:
-        generation_active = False  # Ensure cleanup on any exit
+        generation_active = False
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -18,8 +18,8 @@ CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
 N_CONTEXT = 50
-CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
-# CV_DEFAULT_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
+# CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+CV_DEFAULT_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
 VECTORS = [
