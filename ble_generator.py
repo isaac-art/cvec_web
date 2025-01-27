@@ -1,4 +1,5 @@
 import os
+import wat
 import json
 import math
 import time
@@ -25,16 +26,16 @@ CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
-N_CONTEXT = 500
+N_CONTEXT = 10
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
 CVEC = "vectors/moon/moon_20241218.gguf"
-MIN_CVEC, MAX_CVEC = -0.8, 1.2
+MIN_CVEC, MAX_CVEC = -0.6, 0.9
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-PROMPT = "Describe what you see: "
+PROMPT = "Who am I?"
 
 # BLE constants
 IMU_SERVICE_UUID = "eb1d3224-ab67-4114-89db-d12ac0684005"
@@ -80,6 +81,7 @@ async def stream_text(request: Request):
                 yield {
                     "data": json.dumps({
                         "content": token.content,
+                        "token_id": token.token_id,
                         "strength": token.strength
                     })
                 }
@@ -91,7 +93,8 @@ async def stream_text(request: Request):
 @dataclasses.dataclass
 class Token:
     content: str
-    strength: float
+    token_id: int = 0
+    strength: float = 0
 
 class Generator:
     def __init__(self):
@@ -102,11 +105,15 @@ class Generator:
         
         print("Loading vector...")
         self.vector = ControlVector.import_gguf(CVEC)
-        self.tokens: list[str] = self.tokenizer.tokenize(PROMPT)
+        self.initial_tokens = self.tokenizer.tokenize("\n \n \n " + PROMPT)
+        self.tokens = self.initial_tokens.copy()
+        self.fullstop_token = self.tokenizer.encode(".")
         self.step = 0
         self.previous_cvec_applied = None
+        self.max_tokens = 250
 
     def next(self, raw_strength: float):
+        # print(self.step)
         strength = (raw_strength + 1) / 2 * (MAX_CVEC - MIN_CVEC) + MIN_CVEC
         vector = self.vector * strength
 
@@ -118,14 +125,28 @@ class Generator:
         context = self.tokenizer.convert_tokens_to_string(self.tokens[-N_CONTEXT:])
         model_tokens = self.tokenizer(context, return_tensors="pt").to(self.model.device)
         logits = self.model.forward(**model_tokens).logits[0, -1, :]
-        logits[self.tokenizer.eos_token_id] = -10000
+        # logits[self.tokenizer.eos_token_id] = -10000
         probs = torch.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, 1)
         token_text = self.tokenizer.decode(next_token)
-        self.tokens.append(token_text)
-        self.step += 1
+        next_token_item = next_token.item()
 
-        return Token(content=token_text, strength=strength)
+        # wat / next_token_item
+        
+        # If we hit end of line token or max tokens, reset tokens to initial prompt
+        if self.step >= self.max_tokens: # and next_token_item == self.fullstop_token:
+            print("Resetting tokens fullstop")
+            self.tokens = self.initial_tokens.copy()
+            self.step = 0
+        elif next_token_item == self.tokenizer.eos_token_id:
+            print("Resetting tokens eos")
+            self.tokens = self.initial_tokens.copy()
+            self.step = 0
+        else:
+            self.tokens.append(token_text)
+            self.step += 1
+
+        return Token(content=token_text, token_id=next_token_item, strength=strength)
 
 class BLEController:
     def __init__(self):
@@ -181,7 +202,7 @@ async def run_generator():
     # print(PROMPT, end='', flush=True)
     
     # Put initial prompt in queue
-    await token_queue.put(Token(content=PROMPT, strength=0))
+    await token_queue.put(Token(content=PROMPT, token_id=0, strength=0))
     
     try:
         while generation_active:

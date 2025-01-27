@@ -2,39 +2,44 @@
 <html>
 <head>
     <title>Moon Text Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            font-family: monospace;
+            font-family: 'Space Mono', 'Courier New', monospace;
+            background: #000;
         }
         #scene-container {
             position: fixed;
             top: 0;
-            left: 0;
-            width: 100%;
+            left: 33%;
+            width: 67%;
             height: 100%;
             z-index: 1;
         }
         #text-container {
             position: fixed;
-            bottom: 0;
+            top: 0;
             left: 0;
-            width: 100%;
-            max-height: 50vh;
+            width: 33%;
+            height: 100vh;
             padding: 20px;
-            font-size: 16px;
-            line-height: 1.5;
+            box-sizing: border-box;
+            font-size: 18px;
+            line-height: 2.2;
+            letter-spacing: 0.02em;
             white-space: pre-wrap;
             color: rgba(255, 255, 255, 0.9);
             z-index: 2;
             overflow-y: auto;
-            background: linear-gradient(to bottom,
-                rgba(0, 0, 0, 0) 0%,
-                rgba(0, 0, 0, 0.7) 20%,
-                rgba(0, 0, 0, 0.8) 100%);
+            background: rgba(0, 0, 0, 0.8);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
             scrollbar-width: thin;
             scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+            font-family: 'Space Mono', 'Courier New', monospace;
         }
         #text-container::-webkit-scrollbar {
             width: 8px;
@@ -46,8 +51,18 @@
             background-color: rgba(255, 255, 255, 0.3);
             border-radius: 4px;
         }
+        .word-moon {
+            color: #FFD700;
+        }
+        .word-ai {
+            color: #007BFF;
+        }
         .token {
-            transition: color 0.3s;
+            transition: color 0.3s, transform 0.3s;
+            display: inline-block;
+            transform-origin: center;
+            position: relative;
+            margin-bottom: 10px;
         }
     </style>
     <script async src="https://unpkg.com/es-module-shims/dist/es-module-shims.js"></script>
