@@ -45,13 +45,22 @@ function getMoonPhase() {
     return (now % period) / period * Math.PI * 2;
 }
 
+function getLibrationAngles() {
+    const now = Date.now() / 1000;
+    // Simulate monthly libration in latitude (±6.7°)
+    const latitudeAngle = Math.sin(now * 0.1) * (6.7 * Math.PI / 180);
+    // Simulate monthly libration in longitude (±7.9°)
+    const longitudeAngle = Math.sin(now * 0.08) * (7.9 * Math.PI / 180);
+    return { latitudeAngle, longitudeAngle };
+}
+
 function animate() {
     requestAnimationFrame(animate);
 
-    // Update moon rotation (wobble)
-    const wobbleSpeed = 0.001;
-    moon.rotation.x = Math.sin(Date.now() * wobbleSpeed) * 0.1;
-    moon.rotation.y += 0.002;
+    // Update moon libration
+    const { latitudeAngle, longitudeAngle } = getLibrationAngles();
+    moon.rotation.x = latitudeAngle;
+    moon.rotation.y = longitudeAngle;
 
     // Update sun position for moon phases
     const phase = getMoonPhase();
@@ -83,18 +92,16 @@ function strengthToColor(strength) {
     return `hsl(${hue}, 80%, 70%)`; // Increased lightness for better visibility
 }
 
-function strengthToBackground(strength) {
-    const normalized = (strength - (-0.5)) / (0.9 - (-0.5));
-    const hue = (1 - normalized) * 120;
-    return `hsl(${hue}, 30%, 95%)`;
-}
+// Track if user has manually scrolled up
+let userHasScrolled = false;
+textContainer.addEventListener('scroll', () => {
+    const isAtBottom = textContainer.scrollHeight - textContainer.scrollTop <= textContainer.clientHeight + 50;
+    userHasScrolled = !isAtBottom;
+});
 
 const evtSource = new EventSource("/stream");
 evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
-    
-    // Update background color based on strength
-    document.body.style.backgroundColor = strengthToBackground(data.strength);
     
     // Add new token with color based on strength
     const span = document.createElement('span');
@@ -103,6 +110,10 @@ evtSource.onmessage = function(event) {
     span.style.color = strengthToColor(data.strength);
     textContainer.appendChild(span);
     
-    // Scroll to bottom
-    textContainer.scrollTop = textContainer.scrollHeight;
+    // Auto-scroll only if user hasn't scrolled up
+    if (!userHasScrolled) {
+        requestAnimationFrame(() => {
+            textContainer.scrollTop = textContainer.scrollHeight;
+        });
+    }
 }; 

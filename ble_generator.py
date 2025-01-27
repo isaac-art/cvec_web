@@ -3,6 +3,7 @@ import json
 import math
 import time
 import random
+import datetime
 import dataclasses
 import asyncio
 import struct
@@ -145,11 +146,11 @@ class BLEController:
         # print(f"Current strength: {current_strength:.2f}")
 
 def get_sine_strength() -> float:
-    """Calculate sine wave strength based on time"""
-    period = 60  # Complete cycle takes 60 seconds
-    current_time = time.time() - start_time
-    # Calculate sine wave between -1 and 1
-    return math.sin(2 * math.pi * (current_time / period))
+    """Calculate sine wave strength based on current second in minute"""
+    current_second = datetime.datetime.now().second
+    # Map seconds (0-59) to radians (0-2π) and shift by π/2 to start at -1
+    angle = (current_second / 60) * 2 * math.pi - (math.pi / 2)
+    return math.sin(angle)
 
 async def run_ble():
     global generation_active, current_strength
