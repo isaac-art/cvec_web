@@ -5,6 +5,8 @@ import cv2
 import time
 from pathlib import Path
 
+from repeng import ControlModel, ControlVector
+
 def setup_model():
     device = "mps" if torch.backends.mps.is_available() else "cuda"
     print("Using device:", device)
@@ -15,6 +17,11 @@ def setup_model():
         device_map="auto",
     )
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2-VL-2B-Instruct")
+    
+    # model = ControlModel(model, layer_ids=list(range(5, 22)))
+    # model.reset()
+    # vector = ControlVector.import_gguf("vectors/qwenv_cvec.gguf")
+    # model.set_control(vector*0.9)
     return model, processor, device
 
 def capture_and_save_frame():
@@ -38,8 +45,8 @@ def capture_and_save_frame():
     
     # Save frame
     temp_path = temp_dir / "current_frame.jpg"
-    # resize to 640x480
-    frame = cv2.resize(frame, (640, 480))
+    # resize to 50%
+    frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
     cv2.imwrite(str(temp_path), frame)
     cv2.imshow("frame", frame)
     cv2.waitKey(0)
@@ -57,7 +64,7 @@ def analyze_image(image_path, model, processor, device):
                     "type": "image",
                     "image": image_path,
                 },
-                {"type": "text", "text": "Describe what you see in this image."},
+                {"type": "text", "text": "What do you see"},
             ],
         }
     ]
@@ -76,7 +83,7 @@ def analyze_image(image_path, model, processor, device):
     )
     inputs = inputs.to(device)
 
-    generated_ids = model.generate(**inputs, max_new_tokens=128)
+    generated_ids = model.generate(**inputs) #, max_new_tokens=128)
     generated_ids_trimmed = [
         out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
     ]

@@ -9,9 +9,10 @@ import struct
 from bleak import BleakClient
 import colorsys
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from sse_starlette.sse import EventSourceResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 import torch
@@ -23,17 +24,16 @@ CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
-N_CONTEXT = 5000
+N_CONTEXT = 500
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
-# CV_DEFAULT_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
-CVEC = "vectors/default/Fish_20250107.gguf"
-MIN_CVEC, MAX_CVEC = -0.5, 0.9
+CVEC = "vectors/moon/moon_20241218.gguf"
+MIN_CVEC, MAX_CVEC = -0.8, 1.2
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-PROMPT = "I am"
+PROMPT = "Describe what you see: "
 
 # BLE constants
 IMU_SERVICE_UUID = "eb1d3224-ab67-4114-89db-d12ac0684005"
@@ -44,74 +44,27 @@ DEVICE_ADDRESS = "753E1AA1-3AD1-DEF4-5B4A-CF09F9640206"
 current_strength = 0.0
 generation_active = True
 token_queue = asyncio.Queue()
+start_time = time.time()  # Add this line to track time for sine wave
+
+sinwave_mode = True  # This existing line will control which mode we use
 
 app = FastAPI()
 
-# HTML template with JavaScript for SSE handling
-HTML_CONTENT = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Text Generation Viewer</title>
-    <style>
-        body {
-            font-family: monospace;
-            margin: 20px;
-            transition: background-color 0.3s;
-        }
-        #text-container {
-            font-size: 16px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-        }
-        .token {
-            transition: color 0.3s;
-        }
-    </style>
-</head>
-<body>
-    <div id="text-container"></div>
-    <script>
-        const textContainer = document.getElementById('text-container');
-        
-        function strengthToColor(strength) {
-            // Convert strength [-0.5, 0.9] to hue [120, 0]
-            const normalized = (strength - (-0.5)) / (0.9 - (-0.5));
-            const hue = (1 - normalized) * 120;
-            return `hsl(${hue}, 80%, 40%)`;
-        }
-        
-        function strengthToBackground(strength) {
-            const normalized = (strength - (-0.5)) / (0.9 - (-0.5));
-            const hue = (1 - normalized) * 120;
-            return `hsl(${hue}, 30%, 95%)`;
-        }
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-        const evtSource = new EventSource("/stream");
-        evtSource.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            
-            // Update background color based on strength
-            document.body.style.backgroundColor = strengthToBackground(data.strength);
-            
-            // Add new token with color based on strength
-            const span = document.createElement('span');
-            span.textContent = data.content;
-            span.className = 'token';
-            span.style.color = strengthToColor(data.strength);
-            textContainer.appendChild(span);
-            
-            // Scroll to bottom
-            window.scrollTo(0, document.body.scrollHeight);
-        };
-    </script>
-</body>
-</html>
-"""
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def get_page():
-    return HTML_CONTENT
+    return FileResponse("static/stream.html")
 
 @app.get("/stream")
 async def stream_text(request: Request):
@@ -191,19 +144,31 @@ class BLEController:
         current_strength = normalized_yaw
         # print(f"Current strength: {current_strength:.2f}")
 
+def get_sine_strength() -> float:
+    """Calculate sine wave strength based on time"""
+    period = 60  # Complete cycle takes 60 seconds
+    current_time = time.time() - start_time
+    # Calculate sine wave between -1 and 1
+    return math.sin(2 * math.pi * (current_time / period))
+
 async def run_ble():
-    global generation_active  # Declare global at start of function
+    global generation_active, current_strength
     ble = BLEController()
     try:
-        print(f"Connecting to BLE device at {DEVICE_ADDRESS}...")
-        async with BleakClient(DEVICE_ADDRESS) as client:
-            print("Connected! Reading orientation data...")
-            
-            ble.client = client
-            await client.start_notify(IMU_DATA_UUID, ble.notification_handler)
-            
+        if sinwave_mode:
             while generation_active:
-                await asyncio.sleep(0.1)  # Fast updates for smooth control
+                current_strength = get_sine_strength()
+                await asyncio.sleep(0.1)  # Update every 100ms
+        else:
+            print(f"Connecting to BLE device at {DEVICE_ADDRESS}...")
+            async with BleakClient(DEVICE_ADDRESS) as client:
+                print("Connected! Reading orientation data...")
+                
+                ble.client = client
+                await client.start_notify(IMU_DATA_UUID, ble.notification_handler)
+                
+                while generation_active:
+                    await asyncio.sleep(0.1)
 
     except Exception as e:
         print(f"\nBLE Error: {str(e)}")
