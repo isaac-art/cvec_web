@@ -11,7 +11,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 sceneContainer.appendChild(renderer.domElement);
 
 // Moon setup
-const moonGeometry = new THREE.SphereGeometry(2, 64, 64);
+const moonGeometry = new THREE.SphereGeometry(3, 64, 64);
 const textureLoader = new THREE.TextureLoader();
 
 // Load moon textures
@@ -66,15 +66,13 @@ sunLight.shadow.camera.bottom = -10;
 
 scene.add(sunLight);
 
-// Camera position adjusted
-camera.position.z = 8;
+// Adjust camera position to be further back to accommodate larger moon
+camera.position.z = 10;
 
-// Updated moon phase calculation
-function getMoonPhase() {
-    const now = Date.now() / 1000;
-    const period = 60; // 60 second cycle
-    return (now % period) / period * Math.PI * 2;
-}
+// Add these variables at the top level
+let currentTokenStrength = 0;
+let targetTokenStrength = 0;
+const LERP_SPEED = 0.05;
 
 function getLibrationAngles() {
     const now = Date.now() / 1000;
@@ -115,29 +113,40 @@ function getLibrationAngles() {
 function animate() {
     requestAnimationFrame(animate);
 
-    // Get libration angles
     const { latitudeAngle, longitudeAngle, physicalLibration } = getLibrationAngles();
     
-    // Apply libration to moon
-    moon.rotation.x = latitudeAngle;                    // Tilt up/down
-    moon.rotation.y = longitudeAngle + physicalLibration; // Side to side wobble
+    moon.rotation.x = latitudeAngle;
+    moon.rotation.y = longitudeAngle + physicalLibration;
+    moon.rotation.z = 0;
     
-    // The moon keeps the same face toward Earth (synchronous rotation)
-    // We only see the wobble due to libration
-    moon.rotation.z = 0; // Moon doesn't spin on its axis relative to Earth
+    currentTokenStrength = THREE.MathUtils.lerp(
+        currentTokenStrength,
+        targetTokenStrength,
+        LERP_SPEED
+    );
     
-    // Update sun and earth positions for realistic moon phases
-    const phase = getMoonPhase();
+    // Map the strength values to moon phases:
+    // -0.6 = new moon (sun behind moon)
+    // 0.0 = half moon (waxing)
+    // 0.9 = full moon (sun in front)
     
-    // Move the sun in a larger circle to create sharper shadows
-    sunLight.position.x = Math.cos(phase) * 50;
-    sunLight.position.z = Math.sin(phase) * 50;
+    // First, normalize the range from -0.6 to 0.9 to 0 to 1
+    const normalizedStrength = (currentTokenStrength - (-0.6)) / (0.9 - (-0.6));
     
-    // Update earth position to properly cast shadow
-    earth.position.x = Math.cos(phase + Math.PI) * 8;
-    earth.position.z = Math.sin(phase + Math.PI) * 8;
+    // Convert to angle where:
+    // 0 = sun behind moon (-0.6 strength)
+    // π/2 = sun at right side (0.0 strength)
+    // π = sun in front (0.9 strength)
+    const phase = normalizedStrength * Math.PI;
+    
+    // Position sun to orbit around the moon
+    sunLight.position.x = 50 * Math.sin(phase);  // Right side is positive X
+    sunLight.position.z = -50 * Math.cos(phase); // Front is negative Z
+    
+    // Earth is always opposite the sun
+    earth.position.x = -8 * Math.sin(phase);
+    earth.position.z = 8 * Math.cos(phase);
 
-    // Keep the sun light pointing at the moon
     sunLight.lookAt(moon.position);
 
     renderer.render(scene, camera);
@@ -181,6 +190,9 @@ textContainer.addEventListener('scroll', () => {
 const evtSource = new EventSource("/stream");
 evtSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
+    
+    // Update the target strength for moon phase
+    targetTokenStrength = data.strength;
     
     // Check if content is empty space and add line break instead
     if (data.content.trim() === ' ' || data.content.trim() === '\n') {
@@ -232,7 +244,7 @@ evtSource.onmessage = function(event) {
     span.style.textShadow = style.textShadow;
     
     wrapper.appendChild(span);
-    wrapper.appendChild(infoLabel);
+    // wrapper.appendChild(infoLabel);
     textContainer.appendChild(wrapper);
     
     if (!userHasScrolled) {
@@ -242,15 +254,15 @@ evtSource.onmessage = function(event) {
     }
 };
 
-// Update the text container styles
-textContainer.style.width = '33%';  // Set to one-third of screen width
-textContainer.style.left = '0';
-textContainer.style.height = '100vh';  // Full height
-textContainer.style.maxHeight = '100vh';  // Override previous max-height
+// Update the text container styles to allow overlap
+textContainer.style.width = '40%';  // Increase width slightly
+textContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.0)'; // More transparent background
+textContainer.style.zIndex = '2'; // Ensure text stays on top
 
-// Update the scene container to take remaining space
-sceneContainer.style.left = '33%';  // Start after text container
-sceneContainer.style.width = '67%';  // Take remaining width
+// Update the scene container to be full width but behind text
+sceneContainer.style.left = '0';  // Start from left edge
+sceneContainer.style.width = '100%';  // Take full width
+sceneContainer.style.zIndex = '1'; // Behind text
 
 // Update camera aspect ratio to match new container dimensions
 function updateCameraAspect() {

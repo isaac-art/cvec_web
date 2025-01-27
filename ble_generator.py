@@ -26,7 +26,7 @@ CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
-N_CONTEXT = 10
+N_CONTEXT = 1
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
