@@ -1,17 +1,27 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Moon Text Generator</title>
+    <title>MOON VECTOR</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --terminal-cyan: #00e5e5;
+            --terminal-blue: #0077ff;
+            --terminal-green: #00ffaa;
+            --glow-color: rgba(0, 229, 229, 0.5);
+        }
+        
         body {
             margin: 0;
             overflow: hidden;
-            font-family: 'Space Mono', 'Courier New', monospace;
+            font-family: 'Space Mono', monospace;
             background: #000;
+            position: relative;
+            color: var(--terminal-cyan);
         }
+
         #scene-container {
             position: fixed;
             top: 0;
@@ -20,43 +30,48 @@
             height: 100%;
             z-index: 1;
         }
+
         #text-container {
             position: fixed;
-            top: 0;
+            top: 25%;
             left: 0;
             width: 33%;
-            height: 100vh;
+            height: 50vh;
             padding: 20px;
-            box-sizing: border-box;
+            /* box-sizing: border-box; */
             font-size: 18px;
             line-height: 1.6;
             letter-spacing: 0.02em;
             white-space: pre-wrap;
-            color: rgba(255, 255, 255, 0.9);
+            /* color: var(--terminal-cyan); */
             z-index: 2;
             overflow-y: auto;
-            background: rgba(0, 0, 0, 0.0);
-            /* border-right: 1px solid rgba(255, 255, 255, 0.1); */
-            scrollbar-width: thin;
-            scrollbar-color: rgba(255, 255, 255, 0.0) transparent;
-            font-family: 'Space Mono', 'Courier New', monospace;
+            background: rgba(0, 0, 0, 0.85);
+            /* border: 1px solid var(--terminal-cyan);
+            border-radius: 5px; */
+            text-shadow: 0 0 5px var(--glow-color);
         }
-        #text-container::-webkit-scrollbar {
+
+        /* #text-container::-webkit-scrollbar {
             width: 8px;
+            background: #000;
         }
-        #text-container::-webkit-scrollbar-track {
-            background: transparent;
-        }
+
         #text-container::-webkit-scrollbar-thumb {
-            background-color: rgba(255, 255, 255, 0.0);
-            border-radius: 0px;
-        }
+            background: var(--terminal-cyan);
+            border-radius: 0;
+        } */
+
         .word-moon {
-            color: #FFD700;
+            color: var(--terminal-blue);
+            text-shadow: 0 0 5px var(--terminal-blue);
         }
+
         .word-ai {
-            color: #007BFF;
+            color: var(--terminal-green);
+            text-shadow: 0 0 5px var(--terminal-green);
         }
+
         .token {
             transition: color 0.3s, transform 0.3s;
             display: inline-block;

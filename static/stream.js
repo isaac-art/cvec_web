@@ -5,8 +5,52 @@ const sceneContainer = document.getElementById('scene-container');
 
 // Three.js setup
 const scene = new THREE.Scene();
+
+// Add stars to the background
+function createStarField() {
+    const starsGeometry = new THREE.BufferGeometry();
+    const starCount = 2500;
+    
+    const positions = new Float32Array(starCount * 3);
+    const sizes = new Float32Array(starCount);
+    
+    for(let i = 0; i < starCount; i++) {
+        // Random position in sphere around camera
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(Math.random() * 2 - 1);
+        const radius = 50 + Math.random() * 50; // Stars between 50 and 100 units away
+        
+        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = radius * Math.cos(phi);
+        
+        // Random sizes between 0.1 and 0.5
+        sizes[i] = 0.15 + Math.random() * 0.6;
+    }
+    
+    starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    starsGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const starsMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.9,
+        size: 0.15,
+        blending: THREE.AdditiveBlending
+    });
+    
+    const starField = new THREE.Points(starsGeometry, starsMaterial);
+    return starField;
+}
+
+// Add stars to scene
+const starField = createStarField();
+scene.add(starField);
+
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setClearColor(0x000000, 1); // Set clear black background
 renderer.setSize(window.innerWidth, window.innerHeight);
 sceneContainer.appendChild(renderer.domElement);
 
@@ -18,15 +62,30 @@ const textureLoader = new THREE.TextureLoader();
 const moonTexture = textureLoader.load('/static/textures/moon_texture.jpg');
 const moonBumpMap = textureLoader.load('/static/textures/moon_bump.jpg');
 
+// Update moon material for more EVA-like appearance
 const moonMaterial = new THREE.MeshPhongMaterial({
     map: moonTexture,
     bumpMap: moonBumpMap,
     bumpScale: 0.02,
-    shininess: 0,
+    shininess: 30,
+    emissive: new THREE.Color(0x111111), // Add slight emissive for base glow
+    emissiveIntensity: 0.1
 });
 
 const moon = new THREE.Mesh(moonGeometry, moonMaterial);
 scene.add(moon);
+
+// Create a slightly larger sphere for the glow effect
+const glowGeometry = new THREE.SphereGeometry(3.1, 64, 64); // Slightly larger than moon
+const glowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x222222,
+    transparent: true,
+    opacity: 0.2,
+    side: THREE.BackSide // Render on inside of sphere
+});
+
+const moonGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+moon.add(moonGlow); // Add glow as child of moon so it moves with it
 
 // Earth setup (for shadow casting)
 const earthGeometry = new THREE.SphereGeometry(5, 64, 64);
@@ -39,12 +98,21 @@ const earth = new THREE.Mesh(earthGeometry, earthMaterial);
 earth.position.set(-8, 0, 0);
 scene.add(earth);
 
-// Lighting setup
-const ambientLight = new THREE.AmbientLight(0x090909, 0.1);
-scene.add(ambientLight);
+// // Lighting setup
+// const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+// scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
 sunLight.position.set(50, 0, 0);
+
+// Add additional accent lights
+const blueLight = new THREE.PointLight(0x00e5e5, 0.2);
+blueLight.position.set(-10, 5, 5);
+scene.add(blueLight);
+
+const greenLight = new THREE.PointLight(0x00ffaa, 0.1);
+greenLight.position.set(10, -5, -5);
+scene.add(greenLight);
 
 // Enable shadow casting
 renderer.shadowMap.enabled = true;
@@ -112,7 +180,12 @@ function getLibrationAngles() {
 
 function animate() {
     requestAnimationFrame(animate);
-
+    pulseEmissive();
+    
+    // Slowly rotate star field
+    starField.rotation.y += 0.0001;
+    starField.rotation.x += 0.00005;
+    
     const { latitudeAngle, longitudeAngle, physicalLibration } = getLibrationAngles();
     
     moon.rotation.x = latitudeAngle;
@@ -131,7 +204,7 @@ function animate() {
     // 0.9 = full moon (sun in front)
     
     // First, normalize the range from -0.6 to 0.9 to 0 to 1
-    const normalizedStrength = (currentTokenStrength - (-0.6)) / (0.9 - (-0.6));
+    const normalizedStrength = (currentTokenStrength - (-0.9)) / (1.2 - (-0.9));
     
     // Convert to angle where:
     // 0 = sun behind moon (-0.6 strength)
@@ -162,21 +235,20 @@ animate();
 
 // Text stream handling
 function strengthToStyle(strength) {
-    // Convert strength [-0.5, 0.9] to lightness [10, 255]
     const normalized = (strength - (-0.6)) / (0.9 - (-0.6));
-    const lightness = 100 + (normalized * (255 - 120));
     
-    // Calculate stroke opacity (inverse of lightness)
-    // When lightness is 255, opacity is 0
-    // When lightness is 10, opacity is 1
-    const strokeOpacity = 1 - (lightness / 255);
-    
-    // Convert strength to skew angle (-15 to 15 degrees)
+    // Create EVA-style color transitions
+    let color;
+    // Interpolate from slight blue grey (200,200,255) to white (255,255,255)
+    const value = Math.floor(200 + (55 * normalized));
+    const blue = 255;
+    color = `rgb(${value}, ${value}, ${blue})`;
     const skewAngle = (strength * 30) - 15;
     
     return {
-        color: `rgb(${lightness}, ${lightness}, ${lightness})`,
+        color: color,
         transform: `skew(${skewAngle}deg)`,
+        textShadow: `0 0 5px ${color}`
     };
 }
 
@@ -195,7 +267,7 @@ evtSource.onmessage = function(event) {
     targetTokenStrength = data.strength;
     
     // Check if content is empty space and add line break instead
-    if (data.content.trim() === ' ' || data.content.trim() === '\n') {
+    if (data.content.trim() === ' ' || data.content.trim() === '\n' || data.content.includes('.')) {
         textContainer.appendChild(document.createElement('br'));
         return;
     }
@@ -274,4 +346,12 @@ function updateCameraAspect() {
 }
 
 // Initial aspect ratio update
-updateCameraAspect(); 
+updateCameraAspect();
+
+// Update the pulseEmissive function
+function pulseEmissive() {
+    const time = Date.now() * 0.001;
+    moonMaterial.emissiveIntensity = 0.1 + Math.sin(time) * 0.05;
+    // Also pulse the glow opacity
+    glowMaterial.opacity = 0.2 + Math.sin(time * 0.5) * 0.05;
+} 

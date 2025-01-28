@@ -18,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
 import torch
+from vlm_processor import VLM
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from repeng import ControlVector, ControlModel
 
@@ -26,16 +27,16 @@ CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
 CV_TEMPERATURE = 0.7
 
-N_CONTEXT = 1
+N_CONTEXT = 200
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
 CVEC = "vectors/moon/moon_20241218.gguf"
-MIN_CVEC, MAX_CVEC = -0.6, 0.9
+MIN_CVEC, MAX_CVEC = -0.9, 1.2
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-PROMPT = "Who am I?"
+PROMPT = "Scene description"
 
 # BLE constants
 IMU_SERVICE_UUID = "eb1d3224-ab67-4114-89db-d12ac0684005"
@@ -60,6 +61,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+vlm = VLM()
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -98,14 +101,18 @@ class Token:
 
 class Generator:
     def __init__(self):
+        print("Getting camera scene...")
+        scene = vlm.get_image_and_description()
+        start = f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|> In this image I can see"
+
+        print("Loading LM CVEC MODEL")
         self.tokenizer = AutoTokenizer.from_pretrained(CV_DEFAULT_MODEL)
         self.tokenizer.pad_token_id = 0
         model = AutoModelForCausalLM.from_pretrained(CV_DEFAULT_MODEL, torch_dtype=torch.float16).to(DEVICE)
         self.model = ControlModel(model, CV_DEFAULT_LAYERS)
-        
         print("Loading vector...")
         self.vector = ControlVector.import_gguf(CVEC)
-        self.initial_tokens = self.tokenizer.tokenize("\n \n \n " + PROMPT)
+        self.initial_tokens = self.tokenizer.tokenize(start)
         self.tokens = self.initial_tokens.copy()
         self.fullstop_token = self.tokenizer.encode(".")
         self.step = 0
@@ -114,32 +121,30 @@ class Generator:
 
     def next(self, raw_strength: float):
         # print(self.step)
-        strength = (raw_strength + 1) / 2 * (MAX_CVEC - MIN_CVEC) + MIN_CVEC
+        strength = (raw_strength + 1) * 0.5 * (MAX_CVEC - MIN_CVEC) + MIN_CVEC
         vector = self.vector * strength
 
-        if self.previous_cvec_applied is None or vector != self.previous_cvec_applied:
+        # if self.previous_cvec_applied is None or vector != self.previous_cvec_applied:
             # print(f"\nApplying strength: {strength:.2f}")
-            self.model.set_control(vector)
-            self.previous_cvec_applied = vector
+        self.model.set_control(vector)
+        self.previous_cvec_applied = vector
 
         context = self.tokenizer.convert_tokens_to_string(self.tokens[-N_CONTEXT:])
         model_tokens = self.tokenizer(context, return_tensors="pt").to(self.model.device)
         logits = self.model.forward(**model_tokens).logits[0, -1, :]
-        # logits[self.tokenizer.eos_token_id] = -10000
+        # logits[self.tokenizer.eos_token_id] = -10000 # set eos score very low so it isnt selected in softmax
         probs = torch.softmax(logits, dim=-1)
         next_token = torch.multinomial(probs, 1)
         token_text = self.tokenizer.decode(next_token)
         next_token_item = next_token.item()
-
-        # wat / next_token_item
         
         # If we hit end of line token or max tokens, reset tokens to initial prompt
-        if self.step >= self.max_tokens: # and next_token_item == self.fullstop_token:
-            print("Resetting tokens fullstop")
-            self.tokens = self.initial_tokens.copy()
-            self.step = 0
-        elif next_token_item == self.tokenizer.eos_token_id:
-            print("Resetting tokens eos")
+        if self.step >= self.max_tokens or next_token_item == self.tokenizer.eos_token_id:
+            print("Resetting tokens")
+            scene = vlm.get_image_and_description()
+            print(scene)
+            start = f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|>In this image I can see"
+            self.initial_tokens = self.tokenizer.tokenize(start)
             self.tokens = self.initial_tokens.copy()
             self.step = 0
         else:
@@ -233,6 +238,36 @@ async def main():
         generation_active = False
     finally:
         generation_active = False
+
+
+
+def chat_template_unparse(messages: list[tuple[str, str]]) -> str:
+    # Convert chat template (role, content) into a string
+    template = []
+    for role, content in messages:
+        template.append(
+            f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>"
+        )
+    if messages[-1][0] != "assistant":
+        # prefill assistant prefix
+        template.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+    return "".join(template)
+
+
+def chat_template_parse(resp: str) -> list[tuple[str, str]]:
+    # Parse chat template response into list of (role, content) tuples
+    resp = resp.strip().removeprefix("<|begin_of_text|>")
+    messages = []
+    for part in resp.split("<|start_header_id|>"):
+        role_and_content = part.split("<|end_header_id|>")
+        if len(role_and_content) == 1:
+            role, content = role_and_content[0], ""
+        else:
+            role, content = role_and_content
+        content = content.split("<|eot_id|>")[0]
+        messages.append((role.strip(), content.strip()))
+    return messages
+
 
 if __name__ == "__main__":
     asyncio.run(main())
