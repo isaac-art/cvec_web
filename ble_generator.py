@@ -25,18 +25,18 @@ from repeng import ControlVector, ControlModel
 CV_BATCH_SIZE = 32
 CV_METHOD = "pca_center"
 CV_REPETITION_PENALTY = 1.1
-CV_TEMPERATURE = 0.7
+CV_TEMPERATURE = 0.8
 
-N_CONTEXT = 200
+N_CONTEXT = 60
 CV_DEFAULT_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
 CV_DEFAULT_LAYERS = list(range(5, 22))
 
 CVEC = "vectors/moon/moon_20241218.gguf"
-MIN_CVEC, MAX_CVEC = -0.9, 1.2
+MIN_CVEC, MAX_CVEC = -1.1, 1.2
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-PROMPT = "Scene description"
+PROMPT = "I see a "
 
 # BLE constants
 IMU_SERVICE_UUID = "eb1d3224-ab67-4114-89db-d12ac0684005"
@@ -62,7 +62,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-vlm = VLM()
+# vlm = VLM()
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -102,8 +102,8 @@ class Token:
 class Generator:
     def __init__(self):
         print("Getting camera scene...")
-        scene = vlm.get_image_and_description()
-        start = f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|> In this image I can see"
+        # scene = vlm.get_image_and_description()
+        start = "I can see " #f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|> In this image I can see"
 
         print("Loading LM CVEC MODEL")
         self.tokenizer = AutoTokenizer.from_pretrained(CV_DEFAULT_MODEL)
@@ -117,7 +117,7 @@ class Generator:
         self.fullstop_token = self.tokenizer.encode(".")
         self.step = 0
         self.previous_cvec_applied = None
-        self.max_tokens = 250
+        self.max_tokens = 600
 
     def next(self, raw_strength: float):
         # print(self.step)
@@ -141,9 +141,9 @@ class Generator:
         # If we hit end of line token or max tokens, reset tokens to initial prompt
         if self.step >= self.max_tokens or next_token_item == self.tokenizer.eos_token_id:
             print("Resetting tokens")
-            scene = vlm.get_image_and_description()
-            print(scene)
-            start = f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|>In this image I can see"
+            # scene = vlm.get_image_and_description()
+            # print(scene)
+            start = "I can see " #f"<|start_header_id|>user<|end_header_id|>\n\n You can see {scene}<|eot_id|><|start_header_id|>assistant<|end_header_id|>In this image I can see"
             self.initial_tokens = self.tokenizer.tokenize(start)
             self.tokens = self.initial_tokens.copy()
             self.step = 0
@@ -178,13 +178,15 @@ def get_sine_strength() -> float:
     angle = (current_second / 60) * 2 * math.pi - (math.pi / 2)
     return math.sin(angle)
 
+
 async def run_ble():
     global generation_active, current_strength
     ble = BLEController()
+    
     try:
         if sinwave_mode:
             while generation_active:
-                current_strength = get_sine_strength()
+                # current_strength = get_sine_strength()
                 await asyncio.sleep(0.1)  # Update every 100ms
         else:
             print(f"Connecting to BLE device at {DEVICE_ADDRESS}...")
@@ -201,20 +203,27 @@ async def run_ble():
         print(f"\nBLE Error: {str(e)}")
         generation_active = False
 
+
+def get_sine_inc(i:int):
+    # given timestep i, return a value between MIN_CVEC and MAX_CVEC on sinewave
+    return MIN_CVEC + (MAX_CVEC - MIN_CVEC) * (math.sin(i / 200 * 2 * math.pi) + 1) / 2
+
 async def run_generator():
     global generation_active
     generator = Generator()
     # print(PROMPT, end='', flush=True)
     
     # Put initial prompt in queue
-    await token_queue.put(Token(content=PROMPT, token_id=0, strength=0))
+    await token_queue.put(Token(content="I can see ", token_id=0, strength=0))
     
+    i = MIN_CVEC
     try:
         while generation_active:
-            token = generator.next(current_strength)
+            # token = generator.next(current_strength)
+            token = generator.next(get_sine_inc(i))
+            i += 1
             await token_queue.put(token)
-            await asyncio.sleep(0.001)
-            
+            await asyncio.sleep(0.01)
     except Exception as e:
         print(f"\nGenerator Error: {str(e)}")
         generation_active = False

@@ -38,29 +38,21 @@
             width: 33%;
             height: 50vh;
             padding: 20px;
-            /* box-sizing: border-box; */
             font-size: 18px;
             line-height: 1.6;
             letter-spacing: 0.02em;
             white-space: pre-wrap;
-            /* color: var(--terminal-cyan); */
             z-index: 2;
             overflow-y: auto;
             background: rgba(0, 0, 0, 0.85);
-            /* border: 1px solid var(--terminal-cyan);
-            border-radius: 5px; */
             text-shadow: 0 0 5px var(--glow-color);
+            -ms-overflow-style: none;  /* Hide scrollbar for IE and Edge */
+            scrollbar-width: none;     /* Hide scrollbar for Firefox */
         }
 
-        /* #text-container::-webkit-scrollbar {
-            width: 8px;
-            background: #000;
+        #text-container::-webkit-scrollbar {
+            display: none;  /* Hide scrollbar for Chrome/Safari/Opera */
         }
-
-        #text-container::-webkit-scrollbar-thumb {
-            background: var(--terminal-cyan);
-            border-radius: 0;
-        } */
 
         .word-moon {
             color: var(--terminal-blue);
