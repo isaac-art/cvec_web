@@ -14,48 +14,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-I include `https://github.com/vgel/repeng/` in this repo for the `repeng` library
-
-## ARCHITECTURE
-
-The project consists of two main components: a FastAPI web server and a training worker process. The web interface allows users to create, manage, and use control vectors, while the worker handles the training queue.
-
-### System Architecture
-
-```mermaid
-graph TD
-    A[Web Interface] -->|HTTP| B[FastAPI Server]
-    B -->|Read/Write| C[(SQLite DB)]
-    B -->|Load/Save| D[Vector Files]
-    E[Training Worker] -->|Process Queue| C
-    E -->|Train| F[LLM Model]
-    E -->|Save| D
-    B -->|Generate| F
-    G[BLE Generator] -->|Stream| H[Browser SSE]
-```
-
-### Training Workflow
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant S as Server
-    participant DB as SQLite
-    participant W as Worker
-    participant M as LLM Model
-
-    U->>S: Create Vector Request
-    S->>DB: Queue Vector (status: queued)
-    W->>DB: Poll for queued vectors
-    W->>DB: Update status (training)
-    W->>M: Load model
-    W->>M: Generate dataset
-    W->>M: Train vector
-    W->>S: Save vector file
-    W->>DB: Update status (trained)
-    U->>S: Use Vector
-    S->>M: Load & apply vector
-```
+I include `https://github.com/vgel/repeng/` in this repo for the `repeng` library 
 
 ## RUN SERVER
 start the server and show the web interface
